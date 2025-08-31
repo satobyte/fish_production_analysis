@@ -74,7 +74,7 @@ def create_mock_cage_data(original_sampling, original_feeding, original_harvest,
 
     return mock_sampling, mock_feeding, mock_harvest
 
-# ------------------- Streamlit App -------------------
+# Streamlit App 
 st.title("Fish Cage Production Analysis")
 
 # Upload data
