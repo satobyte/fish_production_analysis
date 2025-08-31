@@ -5,7 +5,7 @@ import numpy as np
 import plotly.express as px
 
 # -------------------------------
-# 1. Load data function
+# 1. Load data
 # -------------------------------
 def load_data(feeding_file, harvest_file, sampling_file):
     feeding = pd.read_excel(feeding_file)
@@ -19,7 +19,6 @@ def load_data(feeding_file, harvest_file, sampling_file):
 def preprocess_cage2(feeding, harvest, sampling):
     cage_number = 2
 
-    # Filter cage 2
     feeding_c2 = feeding[feeding['CAGE NUMBER'] == cage_number].copy()
     harvest_c2 = harvest[harvest['CAGE'] == cage_number].copy()
     sampling_c2 = sampling[sampling['CAGE NUMBER'] == cage_number].copy()
@@ -28,15 +27,20 @@ def preprocess_cage2(feeding, harvest, sampling):
     stocking_date = pd.to_datetime("2024-07-16")
     stocked_fish = 7902
     initial_abw = 0.7
-
     stocking_row = pd.DataFrame([{
         'DATE': stocking_date,
         'CAGE NUMBER': cage_number,
         'NUMBER OF FISH': stocked_fish,
         'AVERAGE BODY WEIGHT (g)': initial_abw
     }])
-
     sampling_c2 = pd.concat([stocking_row, sampling_c2]).sort_values('DATE')
+
+    # Limit timeframe
+    start_date = pd.to_datetime("2024-07-16")
+    end_date = pd.to_datetime("2025-06-30")
+    sampling_c2 = sampling_c2[(sampling_c2['DATE'] >= start_date) & (sampling_c2['DATE'] <= end_date)]
+    feeding_c2 = feeding_c2[(feeding_c2['DATE'] >= start_date) & (feeding_c2['DATE'] <= end_date)]
+
     return feeding_c2, harvest_c2, sampling_c2
 
 # -------------------------------
@@ -46,20 +50,15 @@ def compute_summary(feeding_c2, sampling_c2):
     feeding_c2['DATE'] = pd.to_datetime(feeding_c2['DATE'])
     sampling_c2['DATE'] = pd.to_datetime(sampling_c2['DATE'])
 
-    # cumulative feed
     feeding_c2['CUM_FEED'] = feeding_c2['FEED AMOUNT (Kg)'].cumsum()
-
-    # total biomass in kg
     sampling_c2['TOTAL_WEIGHT_KG'] = sampling_c2['NUMBER OF FISH'] * sampling_c2['AVERAGE BODY WEIGHT (g)'] / 1000
 
-    # merge feed to sampling by date
     summary = pd.merge_asof(
         sampling_c2.sort_values('DATE'),
         feeding_c2.sort_values('DATE')[['DATE', 'CUM_FEED']],
         on='DATE'
     )
 
-    # eFCR calculations
     summary['AGGREGATED_eFCR'] = summary['CUM_FEED'] / summary['TOTAL_WEIGHT_KG']
     summary['PERIOD_WEIGHT_GAIN'] = summary['TOTAL_WEIGHT_KG'].diff().fillna(summary['TOTAL_WEIGHT_KG'])
     summary['PERIOD_FEED'] = summary['CUM_FEED'].diff().fillna(summary['CUM_FEED'])
@@ -92,7 +91,7 @@ def create_mock_cage_data(summary_c2):
     return mock_summaries
 
 # -------------------------------
-# 5. Streamlit interface
+# 5. Streamlit Interface
 # -------------------------------
 st.title("Fish Cage Production Analysis")
 st.sidebar.header("Upload Excel Files (Cage 2 only)")
@@ -104,23 +103,25 @@ sampling_file = st.sidebar.file_uploader("Fish Sampling", type=["xlsx"])
 if feeding_file and harvest_file and sampling_file:
     feeding, harvest, sampling = load_data(feeding_file, harvest_file, sampling_file)
 
-    # Process cage 2
     feeding_c2, harvest_c2, sampling_c2 = preprocess_cage2(feeding, harvest, sampling)
     summary_c2 = compute_summary(feeding_c2, sampling_c2)
 
     # Generate mock cages
     mock_cages = create_mock_cage_data(summary_c2)
-
-    # Combine cage 2 + mock cages
     all_cages = {2: summary_c2, **mock_cages}
 
-    # Sidebar controls
+    # Sidebar selectors
     st.sidebar.header("Select Options")
     selected_cage = st.sidebar.selectbox("Select Cage", list(all_cages.keys()))
     selected_kpi = st.sidebar.selectbox("Select KPI", ["Growth", "eFCR"])
 
     df = all_cages[selected_cage]
 
+    # Display production summary table
+    st.subheader(f"Cage {selected_cage} Production Summary")
+    st.dataframe(df[['DATE','NUMBER OF FISH','TOTAL_WEIGHT_KG','AGGREGATED_eFCR','PERIOD_eFCR']])
+
+    # Plot graphs
     if selected_kpi == "Growth":
         fig = px.line(df, x='DATE', y='TOTAL_WEIGHT_KG', markers=True,
                       title=f'Cage {selected_cage}: Growth Over Time',
