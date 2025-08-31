@@ -182,33 +182,74 @@ def preprocess_cage2(feeding, harvest, sampling, transfers=None):
 # =====================
 
 def compute_summary(feeding_c2, sampling_c2):
-    feeding_c2 = feeding_c2.copy()
-    sampling_c2 = sampling_c2.copy()
+    feeding_c2  = feeding_c2.copy()
+    s           = sampling_c2.copy().sort_values("DATE")
 
-    feed_col = find_col(feeding_c2,["FEED AMOUNT (KG)","FEED AMOUNT (Kg)","FEED"], fuzzy_hint="FEED")
-    abw_col = find_col(sampling_c2,["AVERAGE BODY WEIGHT(G)","ABW(G)","ABW"], fuzzy_hint="ABW")
+    # Resolve columns
+    feed_col = find_col(feeding_c2,
+        ["FEED AMOUNT (KG)","FEED AMOUNT (Kg)","FEED AMOUNT [KG]","FEED (KG)","FEED KG","FEED_AMOUNT","FEED"],
+        fuzzy_hint="FEED")
+    abw_col = find_col(s, ["AVERAGE BODY WEIGHT(G)","AVERAGE BODY WEIGHT (G)","ABW(G)","ABW [G]","ABW"],
+        fuzzy_hint="ABW")
     if not feed_col or not abw_col:
-        return sampling_c2
+        return s  # fail-safe
 
+    # Cumulative feed (daily) → align to sampling
+    feeding_c2 = feeding_c2.sort_values("DATE")
     feeding_c2["CUM_FEED"] = pd.to_numeric(feeding_c2[feed_col], errors="coerce").fillna(0).cumsum()
+    summary = pd.merge_asof(s, feeding_c2[["DATE","CUM_FEED"]], on="DATE", direction="backward")
 
-    sampling_c2["ABW_G"] = pd.to_numeric(sampling_c2[abw_col].map(to_number), errors="coerce")
-    sampling_c2["TOTAL_WEIGHT_KG"] = (pd.to_numeric(sampling_c2["FISH_ALIVE"], errors="coerce").fillna(0) * sampling_c2["ABW_G"].fillna(0) / 1000.0)
-
-    summary = pd.merge_asof(
-        sampling_c2.sort_values("DATE"),
-        feeding_c2.sort_values("DATE")["DATE"].to_frame().assign(CUM_FEED=feeding_c2["CUM_FEED"].values),
-        on="DATE",
-        direction="backward",
+    # Standing biomass from ABW×fish
+    summary["ABW_G"] = pd.to_numeric(summary[abw_col].map(to_number), errors="coerce")
+    summary["BIOMASS_KG"] = (
+        pd.to_numeric(summary["FISH_ALIVE"], errors="coerce").fillna(0) * summary["ABW_G"].fillna(0) / 1000.0
     )
 
-    tw = summary["TOTAL_WEIGHT_KG"].replace(0, np.nan)
-    summary["AGGREGATED_eFCR"] = summary["CUM_FEED"] / tw
-    summary["PERIOD_WEIGHT_GAIN"] = summary["TOTAL_WEIGHT_KG"].diff().fillna(summary["TOTAL_WEIGHT_KG"])
-    summary["PERIOD_FEED"] = summary["CUM_FEED"].diff().fillna(summary["CUM_FEED"])
-    summary["PERIOD_eFCR"] = summary["PERIOD_FEED"] / summary["PERIOD_WEIGHT_GAIN"].replace(0, np.nan)
+    # Period deltas (assign to current row)
+    summary["FEED_PERIOD_KG"]   = summary["CUM_FEED"].diff()
+    summary["FEED_AGG_KG"]      = summary["CUM_FEED"]
+    summary["ΔBIOMASS_STANDING"] = summary["BIOMASS_KG"].diff()
 
-    return summary
+    # Transfers/harvest period deltas
+    for cum_col, per_col in [
+        ("IN_KG_CUM",  "TRANSFER_IN_KG"),
+        ("OUT_KG_CUM", "TRANSFER_OUT_KG"),
+        ("HARV_KG_CUM","HARVEST_KG"),
+    ]:
+        if cum_col in summary.columns:
+            summary[per_col] = summary[cum_col].diff()
+        else:
+            summary[per_col] = np.nan
+
+    # Growth produced in the period (exclude logistics effects)
+    summary["GROWTH_KG"] = (
+        summary["ΔBIOMASS_STANDING"]
+        + summary["HARVEST_KG"].fillna(0)
+        + summary["TRANSFER_OUT_KG"].fillna(0)
+        - summary["TRANSFER_IN_KG"].fillna(0)
+    )
+
+    # Period eFCR and Aggregated eFCR
+    eps = 1e-9
+    summary["PERIOD_eFCR"] = summary["FEED_PERIOD_KG"] / summary["GROWTH_KG"].where(lambda x: x.abs()>eps)
+    summary["GROWTH_CUM_KG"] = summary["GROWTH_KG"].cumsum(skipna=True)
+    summary["AGGREGATED_eFCR"] = summary["FEED_AGG_KG"] / summary["GROWTH_CUM_KG"].where(lambda x: x.abs()>eps)
+
+    # First row (stocking) should not show period metrics
+    first_idx = summary.index.min()
+    summary.loc[first_idx, ["FEED_PERIOD_KG","ΔBIOMASS_STANDING","TRANSFER_IN_KG","TRANSFER_OUT_KG",
+                            "HARVEST_KG","GROWTH_KG","PERIOD_eFCR"]] = np.nan
+
+    # Final tidy columns for the table
+    cols = [
+        "DATE","CAGE NUMBER","NUMBER OF FISH","ABW_G",
+        "BIOMASS_KG",
+        "FEED_PERIOD_KG","FEED_AGG_KG","GROWTH_KG",
+        "TRANSFER_IN_KG","TRANSFER_OUT_KG","HARVEST_KG",
+        "PERIOD_eFCR","AGGREGATED_eFCR",
+    ]
+    return summary[[c for c in cols if c in summary.columns]]
+
 
 # =====================
 # UI
