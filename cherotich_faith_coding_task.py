@@ -178,41 +178,56 @@ def create_mock_cage_data(summary_c2):
     return mock_summaries
 
 # ---------- 5) UI ----------
-st.title("Fish Cage Production Analysis")
-st.sidebar.header("Upload Excel Files (Cage 2 only)")
-feeding_file = st.sidebar.file_uploader("Feeding Record", type=["xlsx"])
-harvest_file = st.sidebar.file_uploader("Fish Harvest", type=["xlsx"])
-sampling_file = st.sidebar.file_uploader("Fish Sampling", type=["xlsx"])
+    st.title("Fish Cage Production Analysis")
+    st.sidebar.header("Upload Excel Files (Cage 2 only)")
+    feeding_file = st.sidebar.file_uploader("Feeding Record", type=["xlsx"])
+    harvest_file = st.sidebar.file_uploader("Fish Harvest", type=["xlsx"])
+    sampling_file = st.sidebar.file_uploader("Fish Sampling", type=["xlsx"])
 
-if feeding_file and harvest_file and sampling_file:
-    feeding, harvest, sampling = load_data(feeding_file, harvest_file, sampling_file)
-    feeding_c2, harvest_c2, sampling_c2 = preprocess_cage2(feeding, harvest, sampling)
-    summary_c2 = compute_summary(feeding_c2, sampling_c2)
+    if feeding_file and harvest_file and sampling_file:
+        feeding, harvest, sampling = load_data(feeding_file, harvest_file, sampling_file)
+        feeding_c2, harvest_c2, sampling_c2 = preprocess_cage2(feeding, harvest, sampling)
+        summary_c2 = compute_summary(feeding_c2, sampling_c2)
 
-    mock_cages = create_mock_cage_data(summary_c2)
-    all_cages = {2: summary_c2, **mock_cages}
+        mock_cages = create_mock_cage_data(summary_c2)
+        all_cages = {2: summary_c2, **mock_cages}
 
-    st.sidebar.header("Select Options")
-    selected_cage = st.sidebar.selectbox("Select Cage", list(all_cages.keys()))
-    selected_kpi  = st.sidebar.selectbox("Select KPI", ["Growth", "eFCR"])
+        st.sidebar.header("Select Options")
+        selected_cage = st.sidebar.selectbox("Select Cage", list(all_cages.keys()))
+        # KPI options renamed + ABW added
+        selected_kpi  = st.sidebar.selectbox("Select KPI", ["Biomass", "ABW", "eFCR"])
 
-    df = all_cages[selected_cage].copy()
-    st.subheader(f"Cage {selected_cage} Production Summary")
-    st.dataframe(df[["DATE","NUMBER OF FISH","ABW_G","TOTAL_WEIGHT_KG","AGGREGATED_eFCR","PERIOD_eFCR"]])
+        df = all_cages[selected_cage].copy()
+        st.subheader(f"Cage {selected_cage} Production Summary")
+        st.dataframe(df[["DATE","NUMBER OF FISH","ABW_G","TOTAL_WEIGHT_KG","AGGREGATED_eFCR","PERIOD_eFCR"]])
 
-    if selected_kpi == "Growth":
-        df = df.dropna(subset=["TOTAL_WEIGHT_KG"])
-        fig = px.line(df, x="DATE", y="TOTAL_WEIGHT_KG", markers=True,
-                      title=f"Cage {selected_cage}: Growth Over Time",
-                      labels={"TOTAL_WEIGHT_KG": "Total Weight (kg)"})
-        st.plotly_chart(fig, use_container_width=True)
+        if selected_kpi == "Biomass":
+            df = df.dropna(subset=["TOTAL_WEIGHT_KG"])
+            fig = px.line(
+                df, x="DATE", y="TOTAL_WEIGHT_KG", markers=True,
+                title=f"Cage {selected_cage}: Biomass Over Time",
+                labels={"TOTAL_WEIGHT_KG": "Total Biomass (kg)"}
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+        elif selected_kpi == "ABW":
+            df = df.dropna(subset=["ABW_G"])
+            fig = px.line(
+                df, x="DATE", y="ABW_G", markers=True,
+                title=f"Cage {selected_cage}: Average Body Weight Over Time",
+                labels={"ABW_G": "ABW (g)"}
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+        else:  # eFCR
+            df = df.dropna(subset=["AGGREGATED_eFCR","PERIOD_eFCR"])
+            fig = px.line(
+                df, x="DATE", y="AGGREGATED_eFCR", markers=True,
+                title=f"Cage {selected_cage}: eFCR Over Time",
+                labels={"AGGREGATED_eFCR": "Aggregated eFCR"}
+            )
+            fig.add_scatter(x=df["DATE"], y=df["PERIOD_eFCR"], mode="lines+markers", name="Period eFCR")
+            fig.update_layout(yaxis_title="eFCR")
+            st.plotly_chart(fig, use_container_width=True)
     else:
-        df = df.dropna(subset=["AGGREGATED_eFCR","PERIOD_eFCR"])
-        fig = px.line(df, x="DATE", y="AGGREGATED_eFCR", markers=True,
-                      title=f"Cage {selected_cage}: eFCR Over Time",
-                      labels={"AGGREGATED_eFCR": "Aggregated eFCR"})
-        fig.add_scatter(x=df["DATE"], y=df["PERIOD_eFCR"], mode="lines+markers", name="Period eFCR")
-        fig.update_layout(yaxis_title="eFCR")
-        st.plotly_chart(fig, use_container_width=True)
-else:
-    st.info("Upload the three Excel files to begin.")
+        st.info("Upload the three Excel files to begin.")
