@@ -133,78 +133,44 @@ def preprocess_cage2(feeding, harvest, sampling, transfers=None):
     fish_col_h = find_col(harvest_c2, ["NUMBER OF FISH", "NUMBER OF FISH ", "N_FISH"], fuzzy_hint="FISH")
     if fish_col_h:
         h = harvest_c2[["DATE", fish_col_h]].dropna().copy()
-        h["HARV_CUM_FISH"] = h[fish_col_h].astype(float).cumsum()
+        h.rename(columns={fish_col_h: "HARV_CUM_FISH"}, inplace=True)
+        h["HARV_CUM_FISH"] = pd.to_numeric(h["HARV_CUM_FISH"], errors="coerce").fillna(0).cumsum()
     else:
         h = pd.DataFrame({"DATE": [], "HARV_CUM_FISH": []})
 
-    sampling_c2["STOCKED"] = stocked_fish
-
-    # Transfers (in/out) for cage 2
-    tin, tout = None, None
-    if transfers is not None:
-        # ensure required cols
-        num_col_t = find_col(transfers, ["NUMBER OF FISH", "N_FISH"], fuzzy_hint="FISH")
-        w_col_t = find_col(transfers, ["TOTAL WEIGHT [KG]", "TOTAL WEIGHT (KG)", "WEIGHT [KG]"], fuzzy_hint="WEIGHT")
-        # outgoing (origin = cage 2)
-        t_out = transfers[(transfers.get("ORIGIN CAGE") == cage_number)].copy() if "ORIGIN CAGE" in transfers.columns else pd.DataFrame()
-        if not t_out.empty and num_col_t:
-            t_out["OUT_FISH_CUM"] = pd.to_numeric(t_out[num_col_t], errors="coerce").fillna(0).cumsum()
-        if not t_out.empty and w_col_t:
-            t_out["OUT_KG_CUM"] = pd.to_numeric(t_out[w_col_t], errors="coerce").fillna(0).cumsum()
-        # incoming (dest = cage 2)
-        t_in = transfers[(transfers.get("DESTINATION CAGE") == cage_number)].copy() if "DESTINATION CAGE" in transfers.columns else pd.DataFrame()
-        if not t_in.empty and num_col_t:
-            t_in["IN_FISH_CUM"] = pd.to_numeric(t_in[num_col_t], errors="coerce").fillna(0).cumsum()
-        if not t_in.empty and w_col_t:
-            t_in["IN_KG_CUM"] = pd.to_numeric(t_in[w_col_t], errors="coerce").fillna(0).cumsum()
-
-        tin, tout = (t_in if not t_in.empty else None), (t_out if not t_out.empty else None)
-
-    # Merge cumulative harvest + transfers to sampling dates
+    # Base timeline with safe defaults
     base = sampling_c2.sort_values("DATE").copy()
-    base["HARV_CUM_FISH"] = 0.0
+    for col in ["HARV_CUM_FISH", "IN_FISH_CUM", "OUT_FISH_CUM", "IN_KG_CUM", "OUT_KG_CUM"]:
+        base[col] = 0.0
+
+    # Merge cumulative harvest to sampling dates (only setting values if present)
     if not h.empty:
-        base = pd.merge_asof(base, h[["DATE", "HARV_CUM_FISH"]].sort_values("DATE"), on="DATE", direction="backward")
-        base["HARV_CUM_FISH"] = base["HARV_CUM_FISH"].fillna(0)
+        merged_h = pd.merge_asof(base[["DATE"]], h.sort_values("DATE"), on="DATE", direction="backward")
+        base["HARV_CUM_FISH"] = merged_h["HARV_CUM_FISH"].fillna(0)
 
-    # Add cumulative transfer fish & kg
-    for df_t, fish_cum_col, kg_cum_col, prefix in [
-        (tin, "IN_FISH_CUM", "IN_KG_CUM", "IN"),
-        (tout, "OUT_FISH_CUM", "OUT_KG_CUM", "OUT"),
-    ]:
-        if df_t is not None:
-            cols = ["DATE"]
-            if fish_cum_col in df_t.columns:
-                cols.append(fish_cum_col)
-            if kg_cum_col in df_t.columns:
-                cols.append(kg_cum_col)
-            tmp = df_t[cols].sort_values("DATE").copy()
-            base = pd.merge_asof(base, tmp, on="DATE", direction="backward")
-            if fish_cum_col in base.columns:
-                base[fish_cum_col] = base[fish_cum_col].fillna(0)
-            if kg_cum_col in base.columns:
-                base[kg_cum_col] = base[kg_cum_col].fillna(0)
+    # Transfers (in/out) for cage 2 → build cumulative fish/kg series if present
+    if transfers is not None and not transfers.empty:
+        num_col_t = find_col(transfers, ["NUMBER OF FISH", "N_FISH"], fuzzy_hint="FISH")
+        w_col_t = find_col(transfers, ["TOTAL WEIGHT [KG]", "TOTAL WEIGHT (KG)", "WEIGHT [KG]", "WEIGHT (KG)"], fuzzy_hint="WEIGHT")
+
+        # outgoing (origin = cage 2)
+        if "ORIGIN CAGE" in transfers.columns:
+            t_out = transfers[transfers["ORIGIN CAGE"] == cage_number].copy()
         else:
-            base[f"{prefix}_FISH_CUM"] = 0.0
-            base[f"{prefix}_KG_CUM"] = 0.0
+            t_out = pd.DataFrame()
+        if not t_out.empty:
+            if num_col_t:
+                t_out["OUT_FISH_CUM"] = pd.to_numeric(t_out[num_col_t], errors="coerce").fillna(0).cumsum()
+            if w_col_t:
+                t_out["OUT_KG_CUM"] = pd.to_numeric(t_out[w_col_t], errors="coerce").fillna(0).cumsum()
+            # map to sampling dates
+            for col in [c for c in ["OUT_FISH_CUM", "OUT_KG_CUM"] if c in t_out.columns]:
+                merged = pd.merge_asof(base[["DATE"]], t_out[["DATE", col]].sort_values("DATE"), on="DATE", direction="backward")
+                base[col] = merged[col].fillna(0)
 
-    # Standing fish = stocked - harvested + in - out
-    base["FISH_ALIVE"] = (
-        base["STOCKED"]
-        - base.get("HARV_CUM_FISH", 0)
-        + base.get("IN_FISH_CUM", 0)
-        - base.get("OUT_FISH_CUM", 0)
-    ).clip(lower=0)
-
-    # Keep for downstream
-    sampling_c2 = base
-    sampling_c2["NUMBER OF FISH"] = sampling_c2["FISH_ALIVE"].astype(int)
-
-    return feeding_c2, harvest_c2, sampling_c2
-
-
-# =====================
-# Compute summary (adds transfer in/out per period)
+        # incoming (dest = cage 2)
+        if "DESTINATION CAGE" in transfers.columns:
+            t_in = transfers[transfers["DESTINATION CAGE"] == cage_number].copy() (adds transfer in/out per period)
 # =====================
 
 def compute_summary(feeding_c2, sampling_c2):
