@@ -118,13 +118,18 @@ if feeding_file and harvest_file and sampling_file:
     st.dataframe(df[['DATE','NUMBER OF FISH','TOTAL_WEIGHT_KG','AGGREGATED_eFCR','PERIOD_eFCR']])
 
     # Plot graphs
-    if selected_kpi == "Growth":
-        fig = px.line(df, x='DATE', y='TOTAL_WEIGHT_KG', markers=True,
-                      title=f'Cage {selected_cage}: Growth Over Time',
-                      labels={'TOTAL_WEIGHT_KG': 'Total Weight (Kg)'})
-        st.plotly_chart(fig)
-    else:
-        fig = px.line(df, x='DATE', y='AGGREGATED_eFCR', markers=True, name='Aggregated eFCR')
-        fig.add_scatter(x=df['DATE'], y=df['PERIOD_eFCR'], mode='lines+markers', name='Period eFCR')
-        fig.update_layout(title=f'Cage {selected_cage}: eFCR Over Time', yaxis_title='eFCR')
-        st.plotly_chart(fig)
+if selected_kpi == "Growth":
+    df['TOTAL_WEIGHT_KG'] = pd.to_numeric(df['TOTAL_WEIGHT_KG'], errors='coerce')
+    df = df.dropna(subset=['TOTAL_WEIGHT_KG'])
+    fig = px.line(df, x='DATE', y='TOTAL_WEIGHT_KG', markers=True,
+                  title=f'Cage {selected_cage}: Growth Over Time',
+                  labels={'TOTAL_WEIGHT_KG': 'Total Weight (Kg)'})
+    st.plotly_chart(fig)
+else:
+    df['AGGREGATED_eFCR'] = pd.to_numeric(df['AGGREGATED_eFCR'], errors='coerce')
+    df['PERIOD_eFCR'] = pd.to_numeric(df['PERIOD_eFCR'], errors='coerce')
+    df = df.dropna(subset=['AGGREGATED_eFCR','PERIOD_eFCR'])
+    fig = px.line(df, x='DATE', y='AGGREGATED_eFCR', markers=True, name='Aggregated eFCR')
+    fig.add_scatter(x=df['DATE'], y=df['PERIOD_eFCR'], mode='lines+markers', name='Period eFCR')
+    fig.update_layout(title=f'Cage {selected_cage}: eFCR Over Time', yaxis_title='eFCR')
+    st.plotly_chart(fig)
