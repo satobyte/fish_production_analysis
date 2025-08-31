@@ -283,6 +283,8 @@ if feeding_file and harvest_file and sampling_file:
         )
         st.plotly_chart(fig, use_container_width=True)
 
+# ... (imports and functions unchanged)
+
     else:  # eFCR
         df = df.dropna(subset=["AGGREGATED_eFCR", "PERIOD_eFCR"])
         fig = px.line(
@@ -293,11 +295,20 @@ if feeding_file and harvest_file and sampling_file:
             title=f"Cage {selected_cage}: eFCR Over Time",
             labels={"AGGREGATED_eFCR": "Aggregated eFCR"},
         )
-        # Ensure both lines show up with clear legend entries
-        fig.update_traces(name="Aggregated eFCR", selector=dict(name="AGGREGATED_eFCR"))
-        fig.add_scatter(x=df["DATE"], y=df["PERIOD_eFCR"], mode="lines+markers", name="Period eFCR")
+        # Force legend for first trace
+        fig.update_traces(showlegend=True, name="Aggregated eFCR")
+        # Add second trace with legend
+        fig.add_scatter(
+            x=df["DATE"],
+            y=df["PERIOD_eFCR"],
+            mode="lines+markers",
+            name="Period eFCR",
+            showlegend=True,
+            line=dict(dash="dash")  # dashed line for distinction
+        )
         fig.update_layout(yaxis_title="eFCR", legend_title_text="Legend")
         st.plotly_chart(fig, use_container_width=True)
 else:
     st.info("Upload the three Excel files to begin.")
+
 
