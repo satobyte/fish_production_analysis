@@ -5,7 +5,7 @@ import numpy as np
 import plotly.express as px
 
 # -------------------------------
-# 1. Load data function
+# 1. Load data
 # -------------------------------
 def load_data(feeding_file, harvest_file, sampling_file):
     feeding = pd.read_excel(feeding_file)
@@ -18,30 +18,27 @@ def load_data(feeding_file, harvest_file, sampling_file):
 # -------------------------------
 def preprocess_cage2(feeding, harvest, sampling):
     cage_number = 2
-
-    feeding_c2 = feeding[feeding['CAGE NUMBER'] == cage_number].copy()
-    harvest_c2 = harvest[harvest['CAGE'] == cage_number].copy()
-    sampling_c2 = sampling[sampling['CAGE NUMBER'] == cage_number].copy()
+    feeding_c2 = feeding[feeding['CAGE NUMBER']==cage_number].copy()
+    harvest_c2 = harvest[harvest['CAGE']==cage_number].copy()
+    sampling_c2 = sampling[sampling['CAGE NUMBER']==cage_number].copy()
 
     # Add stocking manually
     stocking_date = pd.to_datetime("2024-07-16")
     stocked_fish = 7902
     initial_abw = 0.7
-
     stocking_row = pd.DataFrame([{
         'DATE': stocking_date,
         'CAGE NUMBER': cage_number,
         'NUMBER OF FISH': stocked_fish,
         'AVERAGE BODY WEIGHT (g)': initial_abw
     }])
-
-    sampling_c2 = pd.concat([stocking_row, sampling_c2]).sort_values('DATE')
+    sampling_c2 = pd.concat([stocking_row, sampling_c2]).sort_values('DATE').reset_index(drop=True)
 
     # Limit timeframe
     start_date = pd.to_datetime("2024-07-16")
     end_date = pd.to_datetime("2025-06-30")
-    sampling_c2 = sampling_c2[(sampling_c2['DATE'] >= start_date) & (sampling_c2['DATE'] <= end_date)]
-    feeding_c2 = feeding_c2[(feeding_c2['DATE'] >= start_date) & (feeding_c2['DATE'] <= end_date)]
+    feeding_c2 = feeding_c2[(feeding_c2['DATE'] >= start_date) & (feeding_c2['DATE'] <= end_date)].copy()
+    sampling_c2 = sampling_c2[(sampling_c2['DATE'] >= start_date) & (sampling_c2['DATE'] <= end_date)].copy()
 
     return feeding_c2, harvest_c2, sampling_c2
 
@@ -49,27 +46,20 @@ def preprocess_cage2(feeding, harvest, sampling):
 # 3. Compute production summary
 # -------------------------------
 def compute_summary(feeding_c2, sampling_c2):
-    feeding_c2['DATE'] = pd.to_datetime(feeding_c2['DATE'])
-    sampling_c2['DATE'] = pd.to_datetime(sampling_c2['DATE'])
+    feeding_c2 = feeding_c2.sort_values('DATE').reset_index(drop=True)
+    sampling_c2 = sampling_c2.sort_values('DATE').reset_index(drop=True)
 
-    # cumulative feed
-    feeding_c2 = feeding_c2.sort_values('DATE')
+    # Cumulative feed per sampling date
     feeding_c2['CUM_FEED'] = feeding_c2['FEED AMOUNT (Kg)'].cumsum()
+    summary = pd.merge_asof(sampling_c2, feeding_c2[['DATE','CUM_FEED']], on='DATE', direction='backward')
 
-    # total biomass in kg
-    sampling_c2 = sampling_c2.sort_values('DATE')
-    sampling_c2['TOTAL_WEIGHT_KG'] = sampling_c2['NUMBER OF FISH'] * sampling_c2['AVERAGE BODY WEIGHT (g)'] / 1000
+    # Total biomass in kg
+    summary['TOTAL_WEIGHT_KG'] = summary['NUMBER OF FISH'] * summary['AVERAGE BODY WEIGHT (g)'] / 1000
 
-    # merge feed to sampling by date using merge_asof
-    summary = pd.merge_asof(
-        sampling_c2,
-        feeding_c2[['DATE', 'CUM_FEED']],
-        on='DATE',
-        direction='backward'
-    )
-
-    # eFCR calculations
+    # Aggregated eFCR
     summary['AGGREGATED_eFCR'] = summary['CUM_FEED'] / summary['TOTAL_WEIGHT_KG']
+
+    # Period calculations
     summary['PERIOD_WEIGHT_GAIN'] = summary['TOTAL_WEIGHT_KG'].diff().fillna(summary['TOTAL_WEIGHT_KG'])
     summary['PERIOD_FEED'] = summary['CUM_FEED'].diff().fillna(summary['CUM_FEED'])
     summary['PERIOD_eFCR'] = summary['PERIOD_FEED'] / summary['PERIOD_WEIGHT_GAIN']
@@ -77,27 +67,27 @@ def compute_summary(feeding_c2, sampling_c2):
     return summary
 
 # -------------------------------
-# 4. Create mock cages (3-7)
+# 4. Create mock cages (3-7) with proper eFCR calculation
 # -------------------------------
 def create_mock_cages(summary_c2, feeding_c2, sampling_c2):
-    mock_cages = {}
-    for cage_id in range(3, 8):
-        # Daily feeding mock
-        daily_feed = feeding_c2.copy()
-        daily_feed['CAGE NUMBER'] = cage_id
-        daily_feed['FEED AMOUNT (Kg)'] = daily_feed['FEED AMOUNT (Kg)'] * np.random.normal(1, 0.1, len(daily_feed))
-        daily_feed['CUM_FEED'] = daily_feed['FEED AMOUNT (Kg)'].cumsum()
+    mock_summaries = {}
+    for cage_id in range(3,8):
+        # Randomize daily feed ±10%
+        mock_feeding = feeding_c2.copy()
+        mock_feeding['FEED AMOUNT (Kg)'] *= np.random.normal(1,0.1,len(mock_feeding))
+        mock_feeding['CAGE NUMBER'] = cage_id
+        mock_feeding['CUM_FEED'] = mock_feeding['FEED AMOUNT (Kg)'].cumsum()
 
-        # Sampling mock
-        sampling_mock = sampling_c2.copy()
-        sampling_mock['CAGE NUMBER'] = cage_id
-        sampling_mock['NUMBER OF FISH'] = sampling_mock['NUMBER OF FISH'] + np.random.randint(-50,50,len(sampling_mock))
-        sampling_mock['AVERAGE BODY WEIGHT (g)'] *= np.random.normal(1,0.05,len(sampling_mock))
+        # Randomize sampling weights ±5%, number of fish ±50
+        mock_sampling = sampling_c2.copy()
+        mock_sampling['NUMBER OF FISH'] = mock_sampling['NUMBER OF FISH'] + np.random.randint(-50,50,len(mock_sampling))
+        mock_sampling['AVERAGE BODY WEIGHT (g)'] *= np.random.normal(1,0.05,len(mock_sampling))
+        mock_sampling['CAGE NUMBER'] = cage_id
 
-        # Compute summary for mock cage
-        summary_mock = compute_summary(daily_feed, sampling_mock)
-        mock_cages[cage_id] = summary_mock
-    return mock_cages
+        # Compute summary
+        summary = compute_summary(mock_feeding, mock_sampling)
+        mock_summaries[cage_id] = summary
+    return mock_summaries
 
 # -------------------------------
 # 5. Streamlit Interface
@@ -111,7 +101,6 @@ sampling_file = st.sidebar.file_uploader("Fish Sampling", type=["xlsx"])
 
 if feeding_file and harvest_file and sampling_file:
     feeding, harvest, sampling = load_data(feeding_file, harvest_file, sampling_file)
-
     feeding_c2, harvest_c2, sampling_c2 = preprocess_cage2(feeding, harvest, sampling)
     summary_c2 = compute_summary(feeding_c2, sampling_c2)
 
@@ -122,24 +111,24 @@ if feeding_file and harvest_file and sampling_file:
     # Sidebar selectors
     st.sidebar.header("Select Options")
     selected_cage = st.sidebar.selectbox("Select Cage", list(all_cages.keys()))
-    selected_kpi = st.sidebar.selectbox("Select KPI", ["Growth", "eFCR"])
+    selected_kpi = st.sidebar.selectbox("Select KPI", ["Growth","eFCR"])
 
     df = all_cages[selected_cage]
 
-    # Display production summary table
+    # Display production summary
     st.subheader(f"Cage {selected_cage} Production Summary")
     st.dataframe(df[['DATE','NUMBER OF FISH','TOTAL_WEIGHT_KG','AGGREGATED_eFCR','PERIOD_eFCR']])
 
     # Plot graphs
-    if selected_kpi == "Growth":
-        df_plot = df.dropna(subset=['TOTAL_WEIGHT_KG'])
-        fig = px.line(df_plot, x='DATE', y='TOTAL_WEIGHT_KG', markers=True,
+    if selected_kpi=="Growth":
+        fig = px.line(df, x='DATE', y='TOTAL_WEIGHT_KG', markers=True,
                       title=f'Cage {selected_cage}: Growth Over Time',
-                      labels={'TOTAL_WEIGHT_KG': 'Total Weight (Kg)'})
+                      labels={'TOTAL_WEIGHT_KG':'Total Weight (Kg)'})
         st.plotly_chart(fig)
     else:
-        df_plot = df.dropna(subset=['AGGREGATED_eFCR','PERIOD_eFCR'])
-        fig = px.line(df_plot, x='DATE', y='AGGREGATED_eFCR', markers=True)
-        fig.add_scatter(x=df_plot['DATE'], y=df_plot['PERIOD_eFCR'], mode='lines+markers', name='Period eFCR')
-        fig.update_layout(title=f'Cage {selected_cage}: eFCR Over Time', yaxis_title='eFCR')
+        fig = px.line(df, x='DATE', y='AGGREGATED_eFCR', markers=True)
+        fig.add_scatter(x=df['DATE'], y=df['PERIOD_eFCR'], mode='lines+markers', name='Period eFCR')
+        fig.update_layout(title=f'Cage {selected_cage}: eFCR Over Time',
+                          yaxis_title='eFCR',
+                          legend_title='eFCR Type')
         st.plotly_chart(fig)
