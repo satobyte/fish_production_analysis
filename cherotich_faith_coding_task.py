@@ -274,10 +274,11 @@ def compute_summary(feeding_c2, sampling_c2):
         ("HARV_KG_CUM","HARVEST_KG"),
     ]:
         summary[per_col] = summary[cum_col].diff() if cum_col in summary.columns else np.nan
-
+    
     # Logistics per period (fish)
-    summary["TRANSFER_IN_FISH"]  = summary["IN_FISH_CUM"].diff()  if "IN_FISH_CUM"  in summary.columns else np.nan
-    summary["TRANSFER_OUT_FISH"] = summary["OUT_FISH_CUM"].diff() if "OUT_FISH_CUM" in summary.columns else np.nan
+    summary["TRANSFER_IN_FISH"]  = summary["IN_FISH_CUM"].diff()   if "IN_FISH_CUM"   in summary.columns else np.nan
+    summary["TRANSFER_OUT_FISH"] = summary["OUT_FISH_CUM"].diff()  if "OUT_FISH_CUM"  in summary.columns else np.nan
+    summary["HARVEST_FISH"]      = summary["HARV_FISH_CUM"].diff() if "HARV_FISH_CUM" in summary.columns else np.nan
 
     # Produced growth in the period
     summary["GROWTH_KG"] = (
@@ -315,10 +316,11 @@ def compute_summary(feeding_c2, sampling_c2):
         "DATE","CAGE NUMBER","NUMBER OF FISH","ABW_G","BIOMASS_KG",
         "FEED_PERIOD_KG","FEED_AGG_KG","GROWTH_KG",
         "TRANSFER_IN_KG","TRANSFER_OUT_KG","HARVEST_KG",
-        "TRANSFER_IN_FISH","TRANSFER_OUT_FISH",
+        "TRANSFER_IN_FISH","TRANSFER_OUT_FISH","HARVEST_FISH",
         "FISH_COUNT_DISCREPANCY",
         "PERIOD_eFCR","AGGREGATED_eFCR",
     ]
+
     return summary[[c for c in cols if c in summary.columns]]
 
 # =====================
@@ -342,10 +344,11 @@ if feeding_file and harvest_file and sampling_file:
         "DATE","NUMBER OF FISH","ABW_G","BIOMASS_KG",
         "FEED_PERIOD_KG","FEED_AGG_KG","GROWTH_KG",
         "TRANSFER_IN_KG","TRANSFER_OUT_KG","HARVEST_KG",
-        "TRANSFER_IN_FISH","TRANSFER_OUT_FISH",
+        "TRANSFER_IN_FISH","TRANSFER_OUT_FISH","HARVEST_FISH",
         "FISH_COUNT_DISCREPANCY",
         "PERIOD_eFCR","AGGREGATED_eFCR",
     ]
+
     st.dataframe(summary_c2[[c for c in show_cols if c in summary_c2.columns]])
 
     selected_kpi = st.sidebar.selectbox("Select KPI", ["Biomass","ABW","eFCR"])
