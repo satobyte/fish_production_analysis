@@ -16,9 +16,9 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 #uploading the files
-from google.colab import files
-
-uploaded = files.upload()
+uploaded_file = st.file_uploader("Upload Excel file", type=["xlsx"])
+if uploaded_file:
+    df = pd.read_excel(uploaded_file)
 
 #loading and reading the data
 def load_data(feeding_file, transfer_file, harvest_file, sampling_file):
