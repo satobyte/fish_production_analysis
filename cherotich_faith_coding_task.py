@@ -1,55 +1,65 @@
-# import libraries
+# -*- coding: utf-8 -*-
 import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
 
-# 1. Load data
-def load_data(feeding_file, transfer_file, harvest_file, sampling_file):
+# -------------------------------
+# 1. Load data function
+# -------------------------------
+def load_data(feeding_file, harvest_file, sampling_file):
     feeding = pd.read_excel(feeding_file)
-    transfer = pd.read_excel(transfer_file)
     harvest = pd.read_excel(harvest_file)
     sampling = pd.read_excel(sampling_file)
-    return feeding, transfer, harvest, sampling
+    return feeding, harvest, sampling
 
+# -------------------------------
 # 2. Preprocess Cage 2
-def preprocess_cage2(feeding, transfer, harvest, sampling):
+# -------------------------------
+def preprocess_cage2(feeding, harvest, sampling):
     cage_number = 2
+
+    # Filter cage 2
     feeding_c2 = feeding[feeding['CAGE NUMBER'] == cage_number].copy()
-    transfer_c2 = transfer[(transfer['ORIGIN CAGE'] == cage_number) | (transfer['DESTINATION CAGE'] == cage_number)].copy()
     harvest_c2 = harvest[harvest['CAGE'] == cage_number].copy()
     sampling_c2 = sampling[sampling['CAGE NUMBER'] == cage_number].copy()
 
-    # Add stocking
+    # Add stocking manually
     stocking_date = pd.to_datetime("2024-07-16")
     stocked_fish = 7902
     initial_abw = 0.7
-    sampling_c2 = pd.concat([
-        pd.DataFrame([{
-            'DATE': stocking_date,
-            'CAGE NUMBER': cage_number,
-            'NUMBER OF FISH': stocked_fish,
-            'AVERAGE BODY WEIGHT (g)': initial_abw
-        }]),
-        sampling_c2
-    ]).sort_values('DATE')
 
-    return feeding_c2, transfer_c2, harvest_c2, sampling_c2
+    stocking_row = pd.DataFrame([{
+        'DATE': stocking_date,
+        'CAGE NUMBER': cage_number,
+        'NUMBER OF FISH': stocked_fish,
+        'AVERAGE BODY WEIGHT (g)': initial_abw
+    }])
 
-# 3. Compute Growth and eFCR
+    sampling_c2 = pd.concat([stocking_row, sampling_c2]).sort_values('DATE')
+    return feeding_c2, harvest_c2, sampling_c2
+
+# -------------------------------
+# 3. Compute production summary
+# -------------------------------
 def compute_summary(feeding_c2, sampling_c2):
     feeding_c2['DATE'] = pd.to_datetime(feeding_c2['DATE'])
     sampling_c2['DATE'] = pd.to_datetime(sampling_c2['DATE'])
 
+    # cumulative feed
     feeding_c2['CUM_FEED'] = feeding_c2['FEED AMOUNT (Kg)'].cumsum()
+
+    # total biomass in kg
     sampling_c2['TOTAL_WEIGHT_KG'] = sampling_c2['NUMBER OF FISH'] * sampling_c2['AVERAGE BODY WEIGHT (g)'] / 1000
 
+    # merge feed to sampling by date
     summary = pd.merge_asof(
         sampling_c2.sort_values('DATE'),
         feeding_c2.sort_values('DATE')[['DATE', 'CUM_FEED']],
         on='DATE'
     )
 
+    # eFCR calculations
     summary['AGGREGATED_eFCR'] = summary['CUM_FEED'] / summary['TOTAL_WEIGHT_KG']
     summary['PERIOD_WEIGHT_GAIN'] = summary['TOTAL_WEIGHT_KG'].diff().fillna(summary['TOTAL_WEIGHT_KG'])
     summary['PERIOD_FEED'] = summary['CUM_FEED'].diff().fillna(summary['CUM_FEED'])
@@ -57,52 +67,59 @@ def compute_summary(feeding_c2, sampling_c2):
 
     return summary
 
-# 4. Create mock data for other cages
-def create_mock_cage_data(original_sampling, original_feeding, original_harvest, cage_id):
-    mock_sampling = original_sampling.copy()
-    mock_feeding = original_feeding.copy()
-    mock_harvest = original_harvest.copy()
+# -------------------------------
+# 4. Create mock cages (3-7)
+# -------------------------------
+def create_mock_cage_data(summary_c2):
+    mock_summaries = {}
+    for cage_id in range(3, 8):
+        mock = summary_c2.copy()
+        mock['CAGE NUMBER'] = cage_id
 
-    mock_sampling['CAGE NUMBER'] = cage_id
-    mock_feeding['CAGE NUMBER'] = cage_id
-    mock_harvest['CAGE'] = cage_id
+        # Randomize weights ±5%, number of fish ±50, feed ±10%
+        mock['TOTAL_WEIGHT_KG'] *= np.random.normal(1, 0.05, size=len(mock))
+        mock['NUMBER OF FISH'] = mock['NUMBER OF FISH'] + np.random.randint(-50, 50, size=len(mock))
+        mock['CUM_FEED'] *= np.random.normal(1, 0.1, size=len(mock))
 
-    mock_sampling['AVERAGE BODY WEIGHT (g)'] *= np.random.normal(1, 0.05, size=len(mock_sampling))
-    mock_sampling['NUMBER OF FISH'] += np.random.randint(-50, 50, size=len(mock_sampling))
-    mock_feeding['FEED AMOUNT (Kg)'] *= np.random.normal(1, 0.1, size=len(mock_feeding))
-    mock_harvest['TOTAL WEIGHT  [kg]'] *= np.random.normal(1, 0.05, size=len(mock_harvest))
+        # recompute eFCR
+        mock['AGGREGATED_eFCR'] = mock['CUM_FEED'] / mock['TOTAL_WEIGHT_KG']
+        mock['PERIOD_WEIGHT_GAIN'] = mock['TOTAL_WEIGHT_KG'].diff().fillna(mock['TOTAL_WEIGHT_KG'])
+        mock['PERIOD_FEED'] = mock['CUM_FEED'].diff().fillna(mock['CUM_FEED'])
+        mock['PERIOD_eFCR'] = mock['PERIOD_FEED'] / mock['PERIOD_WEIGHT_GAIN']
 
-    return mock_sampling, mock_feeding, mock_harvest
+        mock_summaries[cage_id] = mock
 
-# Streamlit App 
+    return mock_summaries
+
+# -------------------------------
+# 5. Streamlit interface
+# -------------------------------
 st.title("Fish Cage Production Analysis")
+st.sidebar.header("Upload Excel Files (Cage 2 only)")
 
-# Upload data
-st.sidebar.header("Upload Excel Files")
 feeding_file = st.sidebar.file_uploader("Feeding Record", type=["xlsx"])
-transfer_file = st.sidebar.file_uploader("Fish Transfer", type=["xlsx"])
 harvest_file = st.sidebar.file_uploader("Fish Harvest", type=["xlsx"])
 sampling_file = st.sidebar.file_uploader("Fish Sampling", type=["xlsx"])
 
-if feeding_file and transfer_file and harvest_file and sampling_file:
-    feeding, transfer, harvest, sampling = load_data(feeding_file, transfer_file, harvest_file, sampling_file)
+if feeding_file and harvest_file and sampling_file:
+    feeding, harvest, sampling = load_data(feeding_file, harvest_file, sampling_file)
 
-    # Cage 2 summary
-    feeding_c2, transfer_c2, harvest_c2, sampling_c2 = preprocess_cage2(feeding, transfer, harvest, sampling)
+    # Process cage 2
+    feeding_c2, harvest_c2, sampling_c2 = preprocess_cage2(feeding, harvest, sampling)
     summary_c2 = compute_summary(feeding_c2, sampling_c2)
 
-    # Generate mock data for cages 3-7
-    cages_summary = {2: summary_c2}
-    for cage_id in range(3, 8):
-        s, f, h = create_mock_cage_data(sampling_c2, feeding_c2, harvest_c2, cage_id)
-        cages_summary[cage_id] = compute_summary(f, s)
+    # Generate mock cages
+    mock_cages = create_mock_cage_data(summary_c2)
 
-    # Sidebar options
+    # Combine cage 2 + mock cages
+    all_cages = {2: summary_c2, **mock_cages}
+
+    # Sidebar controls
     st.sidebar.header("Select Options")
-    selected_cage = st.sidebar.selectbox("Select Cage", list(cages_summary.keys()))
+    selected_cage = st.sidebar.selectbox("Select Cage", list(all_cages.keys()))
     selected_kpi = st.sidebar.selectbox("Select KPI", ["Growth", "eFCR"])
 
-    df = cages_summary[selected_cage]
+    df = all_cages[selected_cage]
 
     if selected_kpi == "Growth":
         fig = px.line(df, x='DATE', y='TOTAL_WEIGHT_KG', markers=True,
