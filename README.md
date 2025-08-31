@@ -108,6 +108,3 @@ MIT License
 ## Author
 
 **Cherotich Faith** – Data Scientist 
-
-Do you want me to do that?
-```
