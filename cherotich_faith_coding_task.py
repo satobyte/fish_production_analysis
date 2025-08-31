@@ -21,12 +21,11 @@ def load_data(feeding_file, harvest_file, sampling_file):
 # -------------------------------
 def preprocess_cage2(feeding, harvest, sampling):
     cage_number = 2
-
     feeding_c2 = feeding[feeding['CAGE NUMBER'] == cage_number].copy()
     harvest_c2 = harvest[harvest['CAGE'] == cage_number].copy()
     sampling_c2 = sampling[sampling['CAGE NUMBER'] == cage_number].copy()
 
-    # Add stocking manually
+    # Add manual stocking
     stocking_date = pd.to_datetime("2024-07-16")
     stocked_fish = 7902
     initial_abw = 0.7
@@ -50,11 +49,8 @@ def preprocess_cage2(feeding, harvest, sampling):
 # 3. Compute production summary
 # -------------------------------
 def compute_summary(feeding_c2, sampling_c2):
-    # Ensure datetime
     feeding_c2['DATE'] = pd.to_datetime(feeding_c2['DATE'])
     sampling_c2['DATE'] = pd.to_datetime(sampling_c2['DATE'])
-
-    # Sort by date
     feeding_c2 = feeding_c2.sort_values('DATE').reset_index(drop=True)
     sampling_c2 = sampling_c2.sort_values('DATE').reset_index(drop=True)
 
@@ -64,7 +60,7 @@ def compute_summary(feeding_c2, sampling_c2):
     # Total biomass
     sampling_c2['TOTAL_WEIGHT_KG'] = sampling_c2['NUMBER OF FISH'] * sampling_c2['AVERAGE BODY WEIGHT (g)'] / 1000
 
-    # Merge asof (last feed up to sample date)
+    # Merge last available feed before sample
     summary = pd.merge_asof(
         sampling_c2,
         feeding_c2[['DATE','CUM_FEED']],
@@ -104,7 +100,7 @@ def create_mock_cages(summary_c2):
     return mock_summaries
 
 # -------------------------------
-# 5. Streamlit interface
+# 5. Streamlit Interface
 # -------------------------------
 st.sidebar.header("Upload Excel Files (Cage 2 only)")
 feeding_file = st.sidebar.file_uploader("Feeding Record", type=["xlsx"])
@@ -140,7 +136,7 @@ if feeding_file and harvest_file and sampling_file:
         st.plotly_chart(fig)
     else:
         df_plot = df.dropna(subset=['AGGREGATED_eFCR','PERIOD_eFCR'])
-        fig = px.line(df_plot, x='DATE', y='AGGREGATED_eFCR', markers=True)
+        fig = px.line(df_plot, x='DATE', y='AGGREGATED_eFCR', markers=True, name='Aggregated eFCR')
         fig.add_scatter(x=df_plot['DATE'], y=df_plot['PERIOD_eFCR'], mode='lines+markers', name='Period eFCR')
         fig.update_layout(title=f'Cage {selected_cage}: eFCR Over Time', yaxis_title='eFCR')
         st.plotly_chart(fig)
