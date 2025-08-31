@@ -287,26 +287,45 @@ def compute_summary(feeding_c2, sampling_c2):
     summary["ABW_G"] = pd.to_numeric(summary[abw_col].map(to_number), errors="coerce")
     summary["BIOMASS_KG"] = (pd.to_numeric(summary["FISH_ALIVE"], errors="coerce").fillna(0) * summary["ABW_G"].fillna(0) / 1000.0)
 
+
     # Period deltas assigned to current row t_i
     summary["FEED_PERIOD_KG"]    = summary["CUM_FEED"].diff()
     summary["FEED_AGG_KG"]       = summary["CUM_FEED"]
     summary["ΔBIOMASS_STANDING"] = summary["BIOMASS_KG"].diff()
-
-    # Logistics per period (kg) from cumulative columns
-    for cum_col, per_col in [("IN_KG_CUM","TRANSFER_IN_KG"),("OUT_KG_CUM","TRANSFER_OUT_KG"),("HARV_KG_CUM","HARVEST_KG")]:
+    
+    # Logistics per period (kg)
+    for cum_col, per_col in [
+        ("IN_KG_CUM","TRANSFER_IN_KG"),
+        ("OUT_KG_CUM","TRANSFER_OUT_KG"),
+        ("HARV_KG_CUM","HARVEST_KG"),
+    ]:
         summary[per_col] = summary[cum_col].diff() if cum_col in summary.columns else np.nan
-
-    # Produced growth in the period
-    summary["GROWTH_KG"] = (summary["ΔBIOMASS_STANDING"] + summary["HARVEST_KG"].fillna(0) + summary["TRANSFER_OUT_KG"].fillna(0) - summary["TRANSFER_IN_KG"].fillna(0))
-
-    # Period & aggregated eFCR → NA when not computable
+    
+    # Logistics per period (fish)
+    summary["TRANSFER_IN_FISH"]  = summary["IN_FISH_CUM"].diff()  if "IN_FISH_CUM"  in summary.columns else np.nan
+    summary["TRANSFER_OUT_FISH"] = summary["OUT_FISH_CUM"].diff() if "OUT_FISH_CUM" in summary.columns else np.nan
+    
+    # Produced growth in the period (kg)
+    summary["GROWTH_KG"] = (
+        summary["ΔBIOMASS_STANDING"]
+        + summary["HARVEST_KG"].fillna(0)
+        + summary["TRANSFER_OUT_KG"].fillna(0)
+        - summary["TRANSFER_IN_KG"].fillna(0)
+    )
+    
+    # Period & aggregated eFCR (NA when not computable)
     growth_cum = summary["GROWTH_KG"].cumsum(skipna=True)
-    summary["PERIOD_eFCR"] = np.where(summary["GROWTH_KG"] > 0, summary["FEED_PERIOD_KG"] / summary["GROWTH_KG"], np.nan)
+    summary["PERIOD_eFCR"]     = np.where(summary["GROWTH_KG"] > 0, summary["FEED_PERIOD_KG"] / summary["GROWTH_KG"], np.nan)
     summary["AGGREGATED_eFCR"] = np.where(growth_cum > 0, summary["FEED_AGG_KG"] / growth_cum, np.nan)
-
+    
     # First row (stocking) → NA for period metrics
     first_idx = summary.index.min()
-    summary.loc[first_idx, ["FEED_PERIOD_KG","ΔBIOMASS_STANDING","TRANSFER_IN_KG","TRANSFER_OUT_KG","HARVEST_KG","GROWTH_KG","PERIOD_eFCR"]] = np.nan
+    summary.loc[first_idx, [
+        "FEED_PERIOD_KG","ΔBIOMASS_STANDING",
+        "TRANSFER_IN_KG","TRANSFER_OUT_KG","HARVEST_KG",
+        "TRANSFER_IN_FISH","TRANSFER_OUT_FISH",
+        "GROWTH_KG","PERIOD_eFCR"
+    ]] = np.nan
 
     # Final tidy columns
     cols = [
@@ -339,8 +358,10 @@ if feeding_file and harvest_file and sampling_file:
         "DATE","NUMBER OF FISH","ABW_G","BIOMASS_KG",
         "FEED_PERIOD_KG","FEED_AGG_KG","GROWTH_KG",
         "TRANSFER_IN_KG","TRANSFER_OUT_KG","HARVEST_KG",
+        "TRANSFER_IN_FISH","TRANSFER_OUT_FISH",   # <-- NEW
         "PERIOD_eFCR","AGGREGATED_eFCR",
     ]
+
     st.dataframe(summary_c2[[c for c in show_cols if c in summary_c2.columns]])
 
     selected_kpi = st.sidebar.selectbox("Select KPI", ["Biomass","ABW","eFCR"]) 
