@@ -138,6 +138,44 @@ def preprocess_cage2(feeding, harvest, sampling, transfers=None):
     base = base[(base["DATE"] >= start_date) & (base["DATE"] <= end_date)].sort_values("DATE").reset_index(drop=True)
     base["STOCKED"] = stocked_fish
 
+    # --- Ensure final harvest date appears as a row with an ABW ---
+    # Find last harvest date within window
+    final_h_date = harvest_c2["DATE"].max() if not harvest_c2.empty else pd.NaT
+    if pd.notna(final_h_date):
+        # rows from that harvest date
+        hh = harvest_c2[harvest_c2["DATE"] == final_h_date].copy()
+
+        # Try weighted ABW = (sum kg * 1000) / sum fish
+        fish_col = find_col(hh, ["NUMBER OF FISH", "NUMBER OF FISH "], "FISH")
+        kg_col   = find_col(hh, ["TOTAL WEIGHT [KG]", "TOTAL WEIGHT (KG)","TOTAL WEIGHT  [KG]"], "WEIGHT")
+        abw_col_h = find_col(hh, ["ABW(G)", "ABW [G]", "ABW"], "ABW")
+
+        abw_final = np.nan
+        if fish_col and kg_col and hh[fish_col].notna().any() and hh[kg_col].notna().any():
+            tot_fish = pd.to_numeric(hh[fish_col], errors="coerce").fillna(0).sum()
+            tot_kg   = pd.to_numeric(hh[kg_col],   errors="coerce").fillna(0).sum()
+            if tot_fish > 0 and tot_kg > 0:
+                abw_final = (tot_kg * 1000.0) / tot_fish
+        # fallback to mean ABW[g] from harvest rows if present
+        if np.isnan(abw_final) and abw_col_h and hh[abw_col_h].notna().any():
+            abw_final = pd.to_numeric(hh[abw_col_h].map(to_number), errors="coerce").mean()
+
+        # If we got an ABW, add/overwrite a row for the final harvest date
+        if pd.notna(abw_final):
+            # if base already has this date, just set ABW there; else append a new row
+            if (base["DATE"] == final_h_date).any():
+                base.loc[base["DATE"] == final_h_date, "AVERAGE BODY WEIGHT(G)"] = abw_final
+            else:
+                base = pd.concat([
+                    base,
+                    pd.DataFrame([{
+                        "DATE": final_h_date,
+                        "CAGE NUMBER": cage_number,
+                        "AVERAGE BODY WEIGHT(G)": abw_final,
+                        "STOCKED": stocked_fish
+                    }])
+                ], ignore_index=True).sort_values("DATE").reset_index(drop=True)
+
     # --- Init cumulative columns
     for col in ["HARV_FISH_CUM","HARV_KG_CUM","IN_FISH_CUM","IN_KG_CUM","OUT_FISH_CUM","OUT_KG_CUM"]:
         base[col] = 0.0
