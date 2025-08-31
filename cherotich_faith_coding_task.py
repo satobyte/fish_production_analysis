@@ -327,15 +327,34 @@ def compute_summary(feeding_c2, sampling_c2):
         "GROWTH_KG","PERIOD_eFCR"
     ]] = np.nan
 
+    # --- Fish count discrepancy (absolute) ---
+    # Expected fish alive from bookkeeping (stock + in - out - harvest fish)
+    summary["EXPECTED_FISH_ALIVE"] = (
+        summary.get("STOCKED", 0)
+        - summary.get("HARV_FISH_CUM", 0)
+        + summary.get("IN_FISH_CUM", 0)
+        - summary.get("OUT_FISH_CUM", 0)
+    )
+    
+    # Actual standing fish from the timeline
+    actual_fish = pd.to_numeric(summary.get("NUMBER OF FISH"), errors="coerce")
+    
+    # Absolute discrepancy (can be + or -)
+    summary["FISH_COUNT_DISCREPANCY"] = (
+        pd.to_numeric(summary["EXPECTED_FISH_ALIVE"], errors="coerce").fillna(0)
+        - actual_fish.fillna(0)
+    )
+
     # Final tidy columns
     cols = [
         "DATE","CAGE NUMBER","NUMBER OF FISH","ABW_G","BIOMASS_KG",
         "FEED_PERIOD_KG","FEED_AGG_KG","GROWTH_KG",
         "TRANSFER_IN_KG","TRANSFER_OUT_KG","HARVEST_KG",
+        "TRANSFER_IN_FISH","TRANSFER_OUT_FISH",          # if you added these
+        "FISH_COUNT_DISCREPANCY",                         # <-- NEW
         "PERIOD_eFCR","AGGREGATED_eFCR",
     ]
     return summary[[c for c in cols if c in summary.columns]]
-
 
 # =====================
 # UI
@@ -358,7 +377,8 @@ if feeding_file and harvest_file and sampling_file:
         "DATE","NUMBER OF FISH","ABW_G","BIOMASS_KG",
         "FEED_PERIOD_KG","FEED_AGG_KG","GROWTH_KG",
         "TRANSFER_IN_KG","TRANSFER_OUT_KG","HARVEST_KG",
-        "TRANSFER_IN_FISH","TRANSFER_OUT_FISH",   # <-- NEW
+        "TRANSFER_IN_FISH","TRANSFER_OUT_FISH",
+        "FISH_COUNT_DISCREPANCY",    # <-- NEW
         "PERIOD_eFCR","AGGREGATED_eFCR",
     ]
 
