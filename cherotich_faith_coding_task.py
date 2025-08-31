@@ -53,7 +53,7 @@ def preprocess_cage2(feeding, transfer, harvest, sampling):
 
     return feeding_c2, transfer_c2, harvest_c2, sampling_c2
 
-#3. Calculate Growth & eFCR
+#3. Calculate Growth and eFCR
 #growth to show changes in ABW over time, ggregated eFCR,and period eFCR at each sampling point.
 
 def compute_summary(feeding_c2, sampling_c2):
@@ -97,7 +97,6 @@ def create_mock_cage_data(original_sampling, original_feeding, original_harvest,
     return mock_sampling, mock_feeding, mock_harvest
 
 # 5. Streamlit App
-# ------------------------
 st.title("Fish Cage Production Analysis")
 
 # Upload data
@@ -158,8 +157,6 @@ def plot_efcr(summary, cage_number=2):
     plt.xlabel('Date')
     plt.legend()
     plt.show()
-
-!pip install streamlit plotly
 
 import streamlit as st
 import plotly.express as px
