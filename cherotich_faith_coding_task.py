@@ -62,18 +62,40 @@ def to_number(x):
 # =====================
 
 def load_data(feeding_file, harvest_file, sampling_file, transfer_file=None):
-    feeding = normalize_columns(pd.read_excel(feeding_file))
-    harvest = normalize_columns(pd.read_excel(harvest_file))
+    feeding  = normalize_columns(pd.read_excel(feeding_file))
+    harvest  = normalize_columns(pd.read_excel(harvest_file))
     sampling = normalize_columns(pd.read_excel(sampling_file))
-    transfers = None
-    if transfer_file is not None:
-        transfers = normalize_columns(pd.read_excel(transfer_file))
+    transfers = normalize_columns(pd.read_excel(transfer_file)) if transfer_file is not None else None
 
+    # --- Coerce cage labels to integers (C2 → 2) ---
+    if "CAGE NUMBER" in feeding.columns:
+        feeding["CAGE NUMBER"] = to_int_cage(feeding["CAGE NUMBER"])
+    if "CAGE NUMBER" in sampling.columns:
+        sampling["CAGE NUMBER"] = to_int_cage(sampling["CAGE NUMBER"])
+    if "CAGE NUMBER" in harvest.columns:
+        harvest["CAGE NUMBER"] = to_int_cage(harvest["CAGE NUMBER"])
+    elif "CAGE" in harvest.columns:
+        harvest["CAGE NUMBER"] = to_int_cage(harvest["CAGE"])
+
+    if transfers is not None:
+        # common origin/destination headers → integers
+        for col in ["ORIGIN CAGE", "DESTINATION CAGE"]:
+            if col in transfers.columns:
+                transfers[col] = to_int_cage(transfers[col])
+        # normalize transfer weight column
+        wcol = find_col(transfers,
+                        ["TOTAL WEIGHT [KG]", "TOTAL WEIGHT (KG)", "WEIGHT [KG]", "WEIGHT (KG)"],
+                        fuzzy_hint="WEIGHT")
+        if wcol and wcol != "TOTAL WEIGHT [KG]":
+            transfers.rename(columns={wcol: "TOTAL WEIGHT [KG]"}, inplace=True)
+
+    # --- Parse dates robustly ---
     for df in [feeding, harvest, sampling] + ([transfers] if transfers is not None else []):
         if df is not None and "DATE" in df.columns:
             df["DATE"] = pd.to_datetime(df["DATE"], errors="coerce")
 
     return feeding, harvest, sampling, transfers
+
 
 # =====================
 # Preprocess Cage 2
