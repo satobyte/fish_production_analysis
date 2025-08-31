@@ -155,28 +155,62 @@ def preprocess_cage2(feeding, harvest, sampling, transfers=None):
         base["HARV_FISH_CUM"] = mh["HARV_FISH_CUM"].fillna(0)
         base["HARV_KG_CUM"]   = mh["HARV_KG_CUM"].fillna(0)
 
-    # Transfers cumulatives (exclude the stocking inbound row)
-    if transfers is not None and not transfers.empty:
-        t = _clip(transfers)
-        if t is not None and not t.empty:
-            if first_inbound_idx is not None and first_inbound_idx in t.index:
-                t = t.drop(index=first_inbound_idx)  # remove stocking event from cumulatives
-            t["T_FISH"] = pd.to_numeric(t[find_col(t,["NUMBER OF FISH"],"FISH")] or 0, errors="coerce").fillna(0) if find_col(t,["NUMBER OF FISH"],"FISH") else 0
-            t["T_KG"]   = pd.to_numeric(t[find_col(t,["TOTAL WEIGHT [KG]","TOTAL WEIGHT (KG)"],"WEIGHT")] or 0, errors="coerce").fillna(0) if find_col(t,["TOTAL WEIGHT [KG]","TOTAL WEIGHT (KG)"],"WEIGHT") else 0
-            # Outgoing
-            if "ORIGIN CAGE" in t.columns:
-                tout = t[t["ORIGIN CAGE"] == cage_number].sort_values("DATE")
-                if not tout.empty:
-                    tout["OUT_FISH_CUM"], tout["OUT_KG_CUM"] = tout["T_FISH"].cumsum(), tout["T_KG"].cumsum()
-                    mo = pd.merge_asof(base[["DATE"]], tout[["DATE","OUT_FISH_CUM","OUT_KG_CUM"]], on="DATE", direction="backward")
-                    base["OUT_FISH_CUM"], base["OUT_KG_CUM"] = mo["OUT_FISH_CUM"].fillna(0), mo["OUT_KG_CUM"].fillna(0)
-            # Incoming
-            if "DESTINATION CAGE" in t.columns:
-                tin = t[t["DESTINATION CAGE"] == cage_number].sort_values("DATE")
-                if not tin.empty:
-                    tin["IN_FISH_CUM"], tin["IN_KG_CUM"] = tin["T_FISH"].cumsum(), tin["T_KG"].cumsum()
-                    mi = pd.merge_asof(base[["DATE"]], tin[["DATE","IN_FISH_CUM","IN_KG_CUM"]], on="DATE", direction="backward")
-                    base["IN_FISH_CUM"], base["IN_KG_CUM"] = mi["IN_FISH_CUM"].fillna(0), mi["IN_KG_CUM"].fillna(0)
+    # ---- Transfers cumulatives (fish & kg), excluding the stocking inbound row ----
+if transfers is not None and not transfers.empty:
+    t = transfers.dropna(subset=["DATE"]).sort_values("DATE").copy()
+    t = t[(t["DATE"] >= start_date) & (t["DATE"] <= end_date)]
+
+    # Identify and drop the first inbound row used as stocking
+    if first_inbound_idx is not None and first_inbound_idx in t.index:
+        t = t.drop(index=first_inbound_idx)
+
+    # Resolve transfer columns once
+    fish_col = find_col(t, ["NUMBER OF FISH", "N_FISH"], fuzzy_hint="FISH")
+    kg_col   = find_col(t, ["TOTAL WEIGHT [KG]", "TOTAL WEIGHT (KG)", "WEIGHT [KG]", "WEIGHT (KG)"], fuzzy_hint="WEIGHT")
+
+    # Build numeric helpers (Series, not scalars)
+    if fish_col:
+        t["T_FISH"] = pd.to_numeric(t[fish_col], errors="coerce").fillna(0)
+    else:
+        t["T_FISH"] = pd.Series(0, index=t.index, dtype="float64")
+
+    if kg_col:
+        t["T_KG"] = pd.to_numeric(t[kg_col], errors="coerce").fillna(0)
+    else:
+        t["T_KG"] = pd.Series(0, index=t.index, dtype="float64")
+
+    # Helper to coerce cage labels like 'C2' → 2
+    def _cage_to_int(x):
+        m = re.search(r"(\d+)", str(x)) if pd.notna(x) else None
+        return int(m.group(1)) if m else None
+
+    # Outgoing (origin = cage 2)
+    if "ORIGIN CAGE" in t.columns:
+        tout = t[t["ORIGIN CAGE"].apply(_cage_to_int) == cage_number].sort_values("DATE").copy()
+        if not tout.empty:
+            tout["OUT_FISH_CUM"] = tout["T_FISH"].cumsum()
+            tout["OUT_KG_CUM"]   = tout["T_KG"].cumsum()
+            mo = pd.merge_asof(
+                base[["DATE"]].sort_values("DATE"),
+                tout[["DATE","OUT_FISH_CUM","OUT_KG_CUM"]].sort_values("DATE"),
+                on="DATE", direction="backward"
+            )
+            base["OUT_FISH_CUM"] = mo["OUT_FISH_CUM"].fillna(0)
+            base["OUT_KG_CUM"]   = mo["OUT_KG_CUM"].fillna(0)
+
+    # Incoming (dest = cage 2)
+    if "DESTINATION CAGE" in t.columns:
+        tin = t[t["DESTINATION CAGE"].apply(_cage_to_int) == cage_number].sort_values("DATE").copy()
+        if not tin.empty:
+            tin["IN_FISH_CUM"] = tin["T_FISH"].cumsum()
+            tin["IN_KG_CUM"]   = tin["T_KG"].cumsum()
+            mi = pd.merge_asof(
+                base[["DATE"]].sort_values("DATE"),
+                tin[["DATE","IN_FISH_CUM","IN_KG_CUM"]].sort_values("DATE"),
+                on="DATE", direction="backward"
+            )
+            base["IN_FISH_CUM"] = mi["IN_FISH_CUM"].fillna(0)
+            base["IN_KG_CUM"]   = mi["IN_KG_CUM"].fillna(0)
 
     # Standing fish (for biomass)
     base["FISH_ALIVE"]     = (base["STOCKED"] - base["HARV_FISH_CUM"] + base["IN_FISH_CUM"] - base["OUT_FISH_CUM"]).clip(lower=0)
